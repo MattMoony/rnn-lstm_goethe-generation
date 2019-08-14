@@ -14,12 +14,12 @@ This is yet another little test project. I thought of doing this, in order to ga
 * [ ] Advanced weight initialization (Xavier initialization, etc.)
 * [x] Simple bias initialization
 * [x] Activation functions (sigmoid, tanh, softmax)
-* [ ] Loss-Function (Cross-Entropy)
-* [ ] Gradient computation function
+* [x] Loss-Function (Cross-Entropy)
+* [x] Gradient computation function
 * [ ] Stochastic Mini Batch Gradient Descent
 * [ ] Advanced SGD (Momentum, Adam, etc.)
 * [ ] J/Epoch-Graph
-* [ ] Prediction function
+* [x] Prediction function
 * _... probably more to come ..._
 
 ---

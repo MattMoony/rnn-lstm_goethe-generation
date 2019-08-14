@@ -58,9 +58,11 @@ def read_dataset(dst_fname: str = 'data.pkl', dct_fname: str = 'dict.csv') -> (l
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
 def translate_to_dict_vector(c: str, dct: dict) -> np.ndarray:
-    for k, v in dct.items():
-        if v == c:
-            return np.where(np.arange(len(dct)) == k, 1, 0)
+    d = len(dct)
+    vs = list(dct.values())
+
+    inds = [vs.index(u) for u in c]
+    return np.asarray([np.where(np.arange(d) == u, 1, 0) for u in inds])
 
 def translate_from_dict_vector(v: np.ndarray, dct: dict) -> str:
     if len(v.shape) == 1:
@@ -85,12 +87,12 @@ def tanh_grad(z, *args, **kwargs):
 
 def softmax(Z):
     Z = Z.copy()
-    Z -= np.max(Z, 1, keepdims=True)
-    return np.exp(Z) / np.sum(np.exp(Z), 1)[:,np.newaxis]
+    Z -= np.max(Z)
+    return np.exp(Z) / np.sum(np.exp(Z))
 
 def softmax_grad(Z, y, *args, **kwargs):
     grad = softmax(Z)
-    grad[np.arange(grad.shape[0]), y] -= 1
+    grad[y] -= 1
     return grad
 
 def grad_check(z, function, lamb=1e-6):
@@ -104,43 +106,254 @@ def predict(xs, r_ws, b_s, n) -> np.ndarray:
 
     ct = np.zeros((len(r_ws), d))
     ht = np.zeros((len(r_ws), d))
+    xt = np.zeros((len(r_ws)+1, d))
 
-    y = np.zeros((n, d))
+    y = np.zeros((n+1, d))
 
     for x in xs:
         w_i = 0
+        xt[w_i] = x
 
-        for w, actf_s, actf_g_s in r_ws:
-            parts = w.dot(np.hstack((ht[w_i], x))).reshape(4,-1)
-            i, f, o, g = [actf_s[n](u) for n, u in enumerate(parts)]
+        for w, actf, actf_g in r_ws:
+            parts = w.dot(np.hstack((ht[w_i], xt[w_i]))).reshape(4,-1)
+            parts = (parts.T + b_s[w_i]).T
+            i, f, o, g = [actf[n](u) for n, u in enumerate(parts)]
             
             ct[w_i] = ct[w_i] * f + i * g
-            ht[w_i] = o * actf_s[-1](ct[w_i])
+            ht[w_i] = o * actf[-2](ct[w_i])
 
+            xt[w_i+1] = actf[-1](ht[w_i])
             w_i += 1
+
+    y[0] = xt[-1]
 
     for j in range(n):
-        # y[j] = softmax(ht[-1].reshape(1,-1))
-        y[j] = np.where(np.arange(d) == np.argmax(ht[-1]), 1, 0)
-
         w_i = 0
+        xt[w_i] = np.where(np.arange(d) == np.argmax(y[j]), 1, 0)
         
-        for w, actf_s, actf_g_s in r_ws:
-            parts = w.dot(np.hstack((ht[w_i], y[-1]))).reshape(4,-1)
-            i, f, o, g = [actf_s[n](u) for n, u in enumerate(parts)]
+        for w, actf, actf_g in r_ws:
+            parts = w.dot(np.hstack((ht[w_i], xt[w_i]))).reshape(4,-1)
+            parts = (parts.T + b_s[w_i]).T
+            i, f, o, g = [actf[n](u) for n, u in enumerate(parts)]
 
             ct[w_i] = ct[w_i] * f + i * g
-            ht[w_i] = o * actf_s[-1](ct[w_i])
+            ht[w_i] = o * actf[-2](ct[w_i])
 
+            xt[w_i+1] = actf[-1](ht[w_i])
             w_i += 1
+
+        y[j+1] = xt[w_i]
     
     return y
+
+def loss(xs, ys, r_ws, b_s, lamb=1e-6):
+    d = xs[0].shape[0]
+    n = ys.shape[0]
+
+    ct = np.zeros((len(r_ws), d))
+    ht = np.zeros((len(r_ws), d))
+    xt = np.zeros((len(r_ws)+1, d))
+
+    y = np.zeros((n+1, d))
+
+    for x in xs:
+        w_i = 0
+        xt[w_i] = x
+
+        for w, actf, actf_g in r_ws:
+            parts = w.dot(np.hstack((ht[w_i], xt[w_i]))).reshape(4,-1)
+            parts = (parts.T + b_s[w_i]).T
+            i, f, o, g = [actf[n](u) for n, u in enumerate(parts)]
+            
+            ct[w_i] = ct[w_i] * f + i * g
+            ht[w_i] = o * actf[-2](ct[w_i])
+
+            xt[w_i+1] = actf[-1](ht[w_i])
+            w_i += 1
+
+    y[0] = xt[-1]
+    loss = 0
+
+    for j in range(n):
+        loss += np.sum(-np.log(y[j, ys[j]]))
+
+        w_i = 0
+        xt[w_i] = np.where(np.arange(d) == np.argmax(y[j]), 1, 0)
+        
+        for w, actf, actf_g in r_ws:
+            parts = w.dot(np.hstack((ht[w_i], xt[w_i]))).reshape(4,-1)
+            parts = (parts.T + b_s[w_i]).T
+            i, f, o, g = [actf[n](u) for n, u in enumerate(parts)]
+
+            ct[w_i] = ct[w_i] * f + i * g
+            ht[w_i] = o * actf[-2](ct[w_i])
+
+            xt[w_i+1] = actf[-1](ht[w_i])
+            w_i += 1
+
+        y[j+1] = xt[w_i]
+
+    loss /= n
+    loss += (lamb / (2*n)) * np.sum(np.asarray([u[0] for u in r_ws]) ** 2)
+
+    return loss
+
+def compute_gradient(xs, ys, r_ws, b_s, lamb=1e-6):
+    # -- VARIABLE DEFINITIONS ---------------------------------------- #
+    
+    d = xs[0].shape[0]
+    n = ys.shape[0]
+    
+    ct = np.zeros((len(r_ws), d))
+    ht = np.zeros((len(r_ws), d))
+    xt = np.zeros((len(r_ws)+1, d))
+    
+    ct_s = []
+    ht_s = []
+    xt_s = []
+
+    ct_g_s = ct.copy()
+    ht_g_s = ht.copy()
+    xt_g_s = xt.copy()+1
+
+    rw_g = [np.zeros(w[0].shape) for w in r_ws]
+    b_g = [np.zeros(b.shape) for b in b_s]
+
+    ft = np.zeros((len(r_ws), d))
+    it = np.zeros((len(r_ws), d))
+    gt = np.zeros((len(r_ws), d))
+    ot = np.zeros((len(r_ws), d))
+    
+    ft_s = []
+    it_s = []
+    gt_s = []
+    ot_s = []
+    
+    y = np.zeros((n+1, d))
+
+    # -- FORWARD PASS ------------------------------------------------ #
+    
+    for x in xs:
+        w_i = 0
+        xt[w_i] = x
+        
+        for w, actf, actf_g in r_ws:
+            parts = w.dot(np.hstack((ht[w_i], xt[w_i]))).reshape(4,-1)
+            parts = (parts.T + b_s[w_i]).T
+            i, f, o, g = [actf[n](u) for n, u in enumerate(parts)]
+
+            it[w_i] = i
+            ft[w_i] = f
+            ot[w_i] = o
+            gt[w_i] = g
+            
+            ct[w_i] = ct[w_i] * f + i * g
+            ht[w_i] = o * actf[-2](ct[w_i])
+
+            xt[w_i+1] = actf[-1](ht[w_i])
+            w_i += 1
+            
+            ct_s.append(ct.copy())
+            ht_s.append(ht.copy())
+            xt_s.append(xt.copy())
+            
+            it_s.append(it.copy())
+            ft_s.append(ft.copy())
+            ot_s.append(ot.copy())
+            gt_s.append(gt.copy())
+
+    y[0] = xt[w_i]
+            
+    for j in range(n):
+        w_i = 0
+        xt[w_i] = np.where(np.arange(d) == np.argmax(y[j]), 1, 0)
+        
+        for w, actf, actf_g in r_ws:
+            parts = w.dot(np.hstack((ht[w_i], xt[w_i]))).reshape(4,-1)
+            parts = (parts.T + b_s[w_i]).T
+            i, f, o, g = [actf[n](u) for n, u in enumerate(parts)]
+            
+            it[w_i] = i
+            ft[w_i] = f
+            ot[w_i] = o
+            gt[w_i] = g
+            
+            ct[w_i] = ct[w_i] * f + i * g
+            ht[w_i] = o * actf[-2](ct[w_i])
+            
+            xt[w_i+1] = actf[-1](ht[w_i])
+            w_i += 1
+            
+        y[j+1] = xt[w_i]
+    
+        ct_s.append(ct.copy())
+        ht_s.append(ht.copy())
+        xt_s.append(xt.copy())
+        
+        it_s.append(it.copy())
+        ft_s.append(ft.copy())
+        ot_s.append(ot.copy())
+        gt_s.append(gt.copy())
+                    
+    # -- BACKWARD PASS ----------------------------------------------- #
+
+    for j in reversed(range(n)):
+        w_i = len(r_ws) - 1
+
+        for w, actf, actf_g in reversed(r_ws):
+            cu_ind = -(j-n+1)-1
+
+            end_g = (
+                xt_g_s[w_i] * 
+                actf_g[-1](ht_s[cu_ind][w_i], np.argmax(xt_s[cu_ind][w_i])) + 
+                ht_g_s[w_i]
+            )
+            highw_g = (
+                end_g *
+                ot_s[cu_ind][w_i] *
+                actf_g[-2](ct_s[cu_ind][w_i]) +
+                ct_g_s[w_i]
+            ) 
+
+            ft_g = highw_g * ct_s[cu_ind-1][w_i]
+            it_g = highw_g * gt_s[cu_ind][w_i]
+            gt_g = highw_g * it_s[cu_ind][w_i]
+            ot_g = end_g * actf[-2](ct_s[-(j-n+1)][w_i])
+
+            parts_g = np.vstack((
+                it_g * actf_g[0](it_s[cu_ind][w_i]), 
+                ft_g * actf_g[1](ft_s[cu_ind][w_i]), 
+                ot_g * actf_g[2](ot_s[cu_ind][w_i]), 
+                gt_g * actf_g[3](gt_s[cu_ind][w_i])
+            ))
+
+            b_g[w_i] += np.sum(parts_g, 1)
+            rw_g[w_i] += parts_g.reshape(4*d,-1).dot(np.hstack((ht_s[cu_ind-1][w_i], xt_s[cu_ind-1][w_i]))[np.newaxis,:])
+
+            ct_g_s = highw_g * ft_s[cu_ind][w_i]
+            
+            stacked = w.T.dot(parts_g.reshape(4*d,-1)).reshape(2,-1)
+
+            ht_g_s = stacked[0]
+            xt_g_s = stacked[1]
+
+    b_g = [(b / n) for b in b_g]
+    rw_g = [(w / n + (lamb / n) * w) for w in rw_g]
+
+    return rw_g, b_g
+
+    # ---------------------------------------------------------------- #
 
 # -------------------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
 def main():
     # -- LOAD DATASET ------------------------------------------------ #
+
+    # dst, dct = build_dataset()
+    # save_dataset(dst)
+
+    # return
 
     dst, dct = read_dataset()
 
@@ -153,19 +366,23 @@ def main():
 
     r_ws = [(
         w1, 
-        (sigmoid, sigmoid, sigmoid, tanh, tanh), 
-        (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad)
+        (sigmoid, sigmoid, sigmoid, tanh, tanh, softmax), 
+        (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad, softmax_grad)
     )]
     b_s = [b1]
 
     # -- TRAIN MODEL ------------------------------------------------- #
-    
 
+    lamb = 1e-6
+    alpha = 1
+    iters = 16
+    
+    lss = loss(dst[0][:10], np.argmax(dst[0][11:15], 1), r_ws, b_s, lamb)
+    rw_g, b_g = compute_gradient(dst[0][:10], np.argmax(dst[0][11:15], 1), r_ws, b_s, lamb)
 
     # -- EVALUATE MODEL ---------------------------------------------- #
 
-    pred = predict(np.array([translate_to_dict_vector('a', dct)]), r_ws, b_s, 10)
-    print(translate_from_dict_vector(pred, dct))
+    pred = predict(translate_to_dict_vector('Hello W', dct), r_ws, b_s, 16)
 
     # -- VISUALIZATION ----------------------------------------------- #
 
