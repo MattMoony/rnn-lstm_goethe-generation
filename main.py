@@ -398,7 +398,7 @@ def compute_gradient(xs, ys, r_ws, fc_w_s, b_s, lamb=1e-6):
         cu_ind = -(j-n+1)-1
 
         xt_g_s[w_i], fullyc_g, bia_g = fc_compute_gradient(xt_s[cu_ind][w_i], ys[j], fc_w_s, b_s[len(r_ws):], 
-            zls_t[cu_ind], als_t[cu_ind])
+            zls_t[cu_ind-1], als_t[cu_ind-1])
 
         for u in range(len(fc_w_g)):
             fc_w_g[u] += fullyc_g[u]
@@ -491,7 +491,7 @@ def compute_gradient(xs, ys, r_ws, fc_w_s, b_s, lamb=1e-6):
 # -------------------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
-def sgd(dst, rw_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=16, decay=0.9, dec_threshold=1e-2, beta=0.9, xn=10):
+def sgd(dst, rw_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=16, decay=0.9, dec_threshold=1e-2, beta=0.9):
     v_inds = np.arange(len(dst))
     past_Js = []
 
@@ -521,8 +521,8 @@ def sgd(dst, rw_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=16, dec
     for i in range(iters):
         vi = np.random.choice(v_inds)
 
-        batchi = np.random.choice(np.arange(dst[vi].shape[0]-1-xn), batch_size)
-        batch = [(dst[vi][j:j+xn+1], np.argmax(dst[vi][j+xn+1])) for j in batchi]
+        batchi = np.random.choice(np.arange(dst[vi].shape[0]-1-batch_size))
+        batch = dst[vi][batchi:batchi+batch_size+1]
 
         tloss = 0.0
 
@@ -530,9 +530,9 @@ def sgd(dst, rw_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=16, dec
         fc_w_g_s = fc_w_g_s_b.copy()
         b_g_s = b_g_s_b.copy()
 
-        for x, y in batch:
-            # x = x[np.newaxis, :]
-            y = np.array([y])[np.newaxis, :]
+        for j in range(1, len(batch)):
+            x = batch[:j]
+            y = np.array([np.argmax(batch[j])])[np.newaxis, :]
 
             cu_rw_g_s, cu_fc_w_g_s, cu_b_g_s = compute_gradient(x, y, rw_s, fc_w_s, b_s, lamb)
 
@@ -551,17 +551,26 @@ def sgd(dst, rw_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=16, dec
 
             v_rw_s[j] = beta * v_rw_s[j] + (1 - beta) * w_g
             rw_s[j][0] -= alpha * v_rw_s[j]
+
+            # v_rw_s[j] = beta * v_rw_s[j] + (1 - beta) * w_g * w_g
+            # rw_s[j][0] -= (alpha / (np.sqrt(v_rw_s[j]) + 1e-8)) * w_g
         for j, w_g in enumerate(fc_w_g_s):
             w_g /= batch_size
             w_g += (lamb / batch_size) * fc_w_s[j][0]
 
             v_fc_w_s[j] = beta * v_fc_w_s[j] + (1 - beta) * w_g
             fc_w_s[j][0] -= alpha * v_fc_w_s[j]
+
+            # v_fc_w_s[j] = beta * v_fc_w_s[j] + (1 - beta) * w_g * w_g
+            # fc_w_s[j][0] -= (alpha / (np.sqrt(v_fc_w_s[j]) + 1e-8)) * w_g
         for j, b_g in enumerate(b_g_s):
             b_g /= batch_size
 
             v_b_s[j] = beta * v_b_s[j] + (1 - beta) * b_g
             b_s[j] -= alpha * v_b_s[j]
+
+            # v_b_s[j] = beta * v_b_s[j] + (1 - beta) * b_g * b_g
+            # b_s[j] -= (alpha / (np.sqrt(v_b_s[j]) + 1e-8)) * b_g
         
         tloss /= batch_size
         tloss += (lamb / batch_size) * np.sum([np.sum(u[0] ** 2) for u in rw_s])
@@ -582,6 +591,8 @@ def sgd(dst, rw_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=16, dec
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
 def main():
+    global dct
+
     # -- LOAD DATASET ------------------------------------------------ #
 
     # dst, dct = build_dataset()
@@ -609,8 +620,8 @@ def main():
     rw_s = [
         [
             w1, 
-            (sigmoid, sigmoid, sigmoid, tanh, tanh, sigmoid), 
-            (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad, sigmoid_grad)
+            (sigmoid, sigmoid, sigmoid, tanh, tanh, softmax), 
+            (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad, softmax_grad)
         ],
         [
             w2,
@@ -631,17 +642,16 @@ def main():
 
     # -- TRAIN MODEL ------------------------------------------------- #
 
-    lamb = 1e-2
-    alpha = 10
+    lamb = 1e-4
+    alpha = 1
     iters = 256
-    batch_size = 16
+    batch_size = 32
     decay = 0.9
     dec_threshold = 0.01
     beta = 0.9
-    xn = 8
 
     n_rw_s, n_fc_w_s, n_b_s, past_Js = sgd(dst, rw_s, fc_w_s, b_s, 
-        lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta, xn=xn)
+        lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     # -- EVALUATE MODEL ---------------------------------------------- #
 
