@@ -15,11 +15,11 @@ This is yet another little test project. I thought of doing this, in order to ga
 * [x] Simple bias initialization
 * [x] Fully connected layer/s
 * [x] Activation functions (sigmoid, tanh, softmax)
-* [x] Loss-Function (Cross-Entropy)
-* [x] Gradient computation function
-* [x] Stochastic Mini Batch Gradient Descent
-* [x] Advanced SGD (Momentum, Adam, etc.)
-* [x] J/Epoch-Graph
+* [ ] Loss-Function (Cross-Entropy)
+* [ ] Gradient computation function
+* [ ] Stochastic Mini Batch Gradient Descent
+* [ ] Advanced SGD (Momentum, Adam, etc.)
+* [ ] J/Epoch-Graph
 * [x] Prediction function
 * _... probably more to come ..._
 
