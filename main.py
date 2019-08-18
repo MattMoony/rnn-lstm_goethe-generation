@@ -186,7 +186,7 @@ def predict(xs, r_w_s, fc_w_s, b_s, n):
             i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
             ct[w_i] = ct[w_i] * f + i * g
-            ht[w_i+1] = o * tanh(ct[w_i])
+            ht[w_i+1] = o * actf[-1](ct[w_i])
 
             w_i += 1
 
@@ -202,28 +202,24 @@ def loss(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
     l += (lamb / (2 * n)) * np.sum(np.asarray([np.sum(u[0] ** 2) for u in r_w_s + fc_w_s]))
     return l
 
-def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6, n=1):
+def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
     h = xs[0].shape[0]
+    n = len(ys)
 
     ct = np.zeros((len(r_w_s), h))
     ht = np.zeros((len(r_w_s)+1, h))
 
-    ct_s = []
-    ht_s = []
-    zt_s = []
+    ct_s = np.zeros((len(xs)+n, len(r_w_s), h))
+    ht_s = np.zeros((len(xs)+n, len(r_w_s)+1, h))
+    zt_s = np.zeros((len(xs)+n, len(r_w_s), 4, h))
 
-    ct_g = []
-    ht_g = []
+    ct_g = np.zeros((len(xs)+n+1, len(r_w_s), h))
+    st_g = np.zeros((len(xs)+n+1, len(r_w_s)+1, 2*h))
 
-    it = ct.copy()
-    ft = it.copy()
-    ot = ft.copy()
-    gt = ot.copy()
-
-    it_s = []
-    ft_s = []
-    ot_s = []
-    gt_s = []
+    it_s = np.zeros((len(xs)+n, len(r_w_s), h))
+    ft_s = np.zeros((len(xs)+n, len(r_w_s), h))
+    ot_s = np.zeros((len(xs)+n, len(r_w_s), h))
+    gt_s = np.zeros((len(xs)+n, len(r_w_s), h))
 
     zl = None
     al = None
@@ -240,38 +236,33 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6, n=1):
 
     # -- FORWARD PASS ------------------------------------------------ #
 
+    cu_ind = 0
+
     for x in xs:
         ht = np.vstack((x, ht[1:]))
         w_i = 0
 
-        zts = []
-
         for w, actf, actf_g in r_w_s:
             stack = np.hstack((ht[w_i+1], ht[w_i]))
             zt = w.dot(stack).reshape(4,-1) + b_s[w_i]
-            j, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
+            i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
-            ct[w_i] = ct[w_i] * f + j * g
+            ct[w_i] = ct[w_i] * f + i * g
             ht[w_i+1] = o * actf[-1](ct[w_i])
 
-            zts.append(zt)
+            zt_s[cu_ind][w_i] = zt
 
-            it[w_i] = j
-            ft[w_i] = f
-            ot[w_i] = o
-            gt[w_i] = g
+            it_s[cu_ind][w_i] = i
+            ft_s[cu_ind][w_i] = f
+            ot_s[cu_ind][w_i] = o
+            gt_s[cu_ind][w_i] = g
 
             w_i += 1
 
-        ht_s.append(ht.copy())
-        ct_s.append(ct.copy())
+        ht_s[cu_ind] = ht
+        ct_s[cu_ind] = ct
 
-        zt_s.append(zts)
-
-        it_s.append(it.copy())
-        ft_s.append(ft.copy())
-        ot_s.append(ot.copy())
-        gt_s.append(gt.copy())
+        cu_ind += 1
 
     for j in range(n):
         al_s.append([])
@@ -296,60 +287,49 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6, n=1):
         ht = np.vstack((x, ht[1:]))
         w_i = 0
 
-        zt_s.append([])
-
         for w, actf, actf_g in r_w_s:
             stack = np.hstack((ht[w_i+1], ht[w_i]))
             zt = w.dot(stack).reshape(4,-1) + b_s[w_i]
             i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
             ct[w_i] = ct[w_i] * f + i * g
-            ht[w_i+1] = o * tanh(ct[w_i])
+            ht[w_i+1] = o * actf[-1](ct[w_i])
 
-            zt_s[len(xs)+j].append(zt.reshape(4,-1))
+            zt_s[cu_ind][w_i] = zt
 
-            it[w_i] = i
-            ft[w_i] = f
-            ot[w_i] = o
-            gt[w_i] = g
+            it_s[cu_ind][w_i] = i
+            ft_s[cu_ind][w_i] = f
+            ot_s[cu_ind][w_i] = o
+            gt_s[cu_ind][w_i] = g
 
             w_i += 1
 
-        ht_s.append(ht)
-        ct_s.append(ct)
+        ht_s[cu_ind] = ht
+        ct_s[cu_ind] = ct
 
-        it_s.append(it.copy())
-        ft_s.append(ft.copy())
-        ot_s.append(ot.copy())
-        gt_s.append(gt.copy())
+        cu_ind += 1
 
     # -- BACKWARD PASS ----------------------------------------------- #    
 
-    ht_g = [np.zeros(u.shape) for u in ht_s]
-    ct_g = [np.zeros(u.shape) for u in ct_s]
+    cu_ind = len(xs) + n - 1
 
-    ht_g.append(ht_g[-1].copy())
-    ct_g.append(ct_g[-1].copy())
-
-    cu_ind = len(xs) + n - 2
-
-    for j in range(n):
-        al_g = np.ones(ys[cu_ind].shape)
+    for j in reversed(range(n)):
+        al_g = np.ones(ys[j].shape)
         w_i = len(b_s) - 1
 
         for w, actf, actf_g in reversed(fc_w_s):
-            grad = al_g * actf_g(zl_s[cu_ind][w_i-len(b_s)+1], ys[cu_ind])
+            grad = al_g * actf_g(zl_s[j][w_i-len(b_s)+1], ys[j])
 
-            fc_w_s_g[w_i-len(r_w_s)] += grad.dot(al_s[cu_ind][w_i-len(b_s)].T)
+            fc_w_s_g[w_i-len(r_w_s)] += grad.dot(al_s[j][w_i-len(b_s)].T)
             b_s_g[w_i] += np.sum(grad)
 
             al_g = w.T.dot(grad.T)
             w_i -= 1
 
-        ht_g[cu_ind][w_i+1] = al_g
+        st_g[cu_ind][w_i+1] = np.hstack((np.zeros(h), al_g))
 
         for w, actf, actf_g in reversed(r_w_s):
-            h_g = ht_g[cu_ind+1][w_i] + ht_g[cu_ind][w_i+1]
+            h_g = st_g[cu_ind+1][w_i][:h] + st_g[cu_ind][w_i+1][h:]
             c_g = ct_g[cu_ind+1][w_i] + h_g * ot_s[cu_ind][w_i] * actf_g[-1](ct_s[cu_ind][w_i])
 
             i_g = c_g * gt_s[cu_ind][w_i]
@@ -364,10 +344,40 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6, n=1):
                 g_g * actf[3](zt_s[cu_ind][w_i][3])
             ))
 
-            r_w_s_g[w_i] += z_g.reshape(-1,1).dot(np.hstack((ht_s[cu_ind-1][w_i], ht_s[cu_ind][w_i-1]))[np.newaxis,:])
+            r_w_s_g[w_i] += z_g.reshape(-1,1).dot(np.hstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i]))[np.newaxis,:])
             b_s_g[w_i] += np.sum(z_g, 1)[:,np.newaxis]
 
-            ht_g[cu_ind][w_i] = 
+            ct_g[cu_ind][w_i] = c_g * ft_s[cu_ind][w_i]
+            st_g[cu_ind][w_i] = w.T.dot(z_g.reshape(-1,1)).flatten()
+
+            w_i -= 1
+
+        cu_ind -= 1
+
+    for x in reversed(xs):
+        w_i = len(r_w_s)-1
+
+        for w, actf, actf_g in reversed(r_w_s):
+            h_g = st_g[cu_ind+1][w_i][:h] + st_g[cu_ind][w_i+1][h:]
+            c_g = ct_g[cu_ind+1][w_i] + h_g * ot_s[cu_ind][w_i] * actf_g[-1](ct_s[cu_ind][w_i])
+
+            i_g = c_g * gt_s[cu_ind][w_i]
+            f_g = c_g * ct_s[cu_ind-1][w_i]
+            o_g = h_g * actf[-1](ct_s[cu_ind][w_i])
+            g_g = c_g * it_s[cu_ind][w_i]
+
+            z_g = np.vstack((
+                i_g * actf[0](zt_s[cu_ind][w_i][0]),
+                f_g * actf[1](zt_s[cu_ind][w_i][1]),
+                o_g * actf[2](zt_s[cu_ind][w_i][2]),
+                g_g * actf[3](zt_s[cu_ind][w_i][3])
+            ))
+
+            r_w_s_g[w_i] += z_g.reshape(-1,1).dot(np.hstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i]))[np.newaxis,:])
+            b_s_g[w_i] += np.sum(z_g, 1)[:,np.newaxis]
+
+            ct_g[cu_ind][w_i] = c_g * ft_s[cu_ind][w_i]
+            st_g[cu_ind][w_i] = w.T.dot(z_g.reshape(-1,1)).flatten()
 
             w_i -= 1
 
@@ -375,13 +385,68 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6, n=1):
 
     # ---------------------------------------------------------------- #    
 
+    for j in range(len(r_w_s_g)):
+        r_w_s_g[j] /= (n+len(xs))
+        r_w_s_g[j] += (lamb/n) * r_w_s[j][0]
+
+    for j in range(len(fc_w_s_g)):
+        fc_w_s_g[j] /= n
+        fc_w_s_g[j] += (lamb/n) * fc_w_s[j][0]
+
+    for j in range(len(b_s_g[:len(r_w_s_g)])):
+        b_s_g[j] /= (n+len(xs))
+    for j in range(len(b_s_g[len(r_w_s_g):])):
+        b_s_g[j] /= n
+
     return r_w_s_g, fc_w_s_g, b_s_g
 
 # -------------------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
-def sgd(dst, r_w_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=16, decay=0.9, dec_threshold=1e-2, beta=0.9):
-    pass
+def sgd(dst, r_w_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=2, decay=0.9, dec_threshold=1e-2, beta=0.9):
+    # dst = 'data-set'
+    past_Js = []
+
+    r_w_s = [w.copy() for w in r_w_s]
+    fc_w_s = [w.copy() for w in fc_w_s]
+    b_s = [b.copy() for b in b_s]
+
+    v_r_w_s = [w[0].copy() for w in r_w_s]
+    v_fc_w_s = [w[0].copy() for w in fc_w_s]
+    v_b_s = [b.copy() for b in b_s]
+
+    for i in range(iters):
+        starti = np.random.randint(0,len(dst)-batch_size+1)
+        batch = dst[starti:starti+batch_size]
+
+        xs = batch[:-1]
+        ys = batch[-1:]
+
+        r_w_s_g, fc_w_s_g, b_s_g = compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb)
+
+        for j, w_g in enumerate(r_w_s_g):
+            v_r_w_s[j] = beta * v_r_w_s[j] + (1 - beta) * w_g
+            r_w_s[j][0] -= alpha * v_r_w_s[j]
+        for j, w_g in enumerate(fc_w_s_g):
+            v_fc_w_s[j] = beta * v_fc_w_s[j] + (1 - beta) * w_g
+            fc_w_s[j][0] -= alpha * v_fc_w_s[j]
+        for j, b_g in enumerate(b_s_g):
+            v_b_s[j] = beta * v_b_s[j] + (1 - beta) * b_g
+            b_s[j] -= alpha * v_b_s[j]
+
+        past_Js.append(loss(xs, ys, r_w_s, fc_w_s, b_s, lamb))
+
+        print('[iter#{:04d}]: loss -> {:} ... '.format(i, past_Js[-1]))
+
+        try:
+            if past_Js[-2] - past_Js[-1] <= dec_threshold:
+                alpha *= decay
+        except IndexError:
+            pass
+
+        print('[  - | -  ]: alpha -> {:} ... '.format(alpha))
+
+    return r_w_s, fc_w_s, b_s, past_Js
 
 # -------------------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------------- #
@@ -394,10 +459,12 @@ def main():
     # return
 
     # dst, dct = read_dataset()
-    dst = np.array([[1, 0], [0, 1]])
+    dst = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
     dct = {
         0: 'h',
-        1: 'e'
+        1: 'e',
+        2: 'l',
+        3: 'o'
     }
 
     # -- SETUP MODEL ------------------------------------------------- #
@@ -419,12 +486,12 @@ def main():
     r_w_s = [
         [
             w1, 
-            (sigmoid, sigmoid, sigmoid, tanh, tanh), 
+            (sigmoid, sigmoid, sigmoid, tanh, tanh_grad), 
             (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad)
         ],
         [
             w2,
-            (sigmoid, sigmoid, sigmoid, tanh, tanh), 
+            (sigmoid, sigmoid, sigmoid, tanh, ReLU), 
             (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad)
         ],
     ]
@@ -443,31 +510,28 @@ def main():
 
     lamb = 0
     alpha = 10
-    iters = 128
-    batch_size = 4
+    iters = 512
+    batch_size = 5
     decay = 0.9
-    dec_threshold = 1e-16
+    dec_threshold = 1e-5
     beta = 0.9
+
+    n_r_w_s, n_fc_w_s, n_b_s, past_Js = sgd(dst, r_w_s, fc_w_s, b_s, 
+        lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     # -- EVALUATE MODEL ---------------------------------------------- #
 
     xs = translate_to_dict_vector('h', dct)
-    ys = translate_to_dict_vector('e', dct)
-    n = 1
+    n = 4
 
-    pred = predict(xs, r_w_s, fc_w_s, b_s, n)
+    pred = predict(xs, n_r_w_s, n_fc_w_s, n_b_s, n)
     print(pred)
     print(translate_from_dict_vector(pred, dct))
 
-    print(loss(xs, ys, r_w_s, fc_w_s, b_s))
-
-    r_w_s_g, fc_w_s_g, b_s_g = compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb)
-
-    # print(r_w_s_g)
-    # print(fc_w_s_g)
-    # print(b_s_g)
-
     # -- VISUALIZATION ----------------------------------------------- #
+
+    plot_j_epoch(past_Js)
+    plt.show()
 
     # -- GENERATION -------------------------------------------------- #
 
