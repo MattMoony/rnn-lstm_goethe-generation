@@ -150,8 +150,8 @@ def predict(xs, r_w_s, fc_w_s, b_s, n):
         w_i = 0
 
         for w, actf, actf_g in r_w_s:
-            stack = np.hstack((ht[w_i+1], ht[w_i]))
-            zt = w.dot(stack).reshape(4,-1) + b_s[w_i]
+            stack = np.vstack((ht[w_i+1], ht[w_i]))
+            zt = np.sum(w * stack, 1) + b_s[w_i]
             i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
             ct[w_i] = ct[w_i] * f + i * g
@@ -181,8 +181,8 @@ def predict(xs, r_w_s, fc_w_s, b_s, n):
         w_i = 0
 
         for w, actf, actf_g in r_w_s:
-            stack = np.hstack((ht[w_i+1], ht[w_i]))
-            zt = w.dot(stack).reshape(4,-1) + b_s[w_i]
+            stack = np.vstack((ht[w_i+1], ht[w_i]))
+            zt = np.sum(w * stack, 1) + b_s[w_i]
             i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
             ct[w_i] = ct[w_i] * f + i * g
@@ -214,7 +214,7 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
     zt_s = np.zeros((len(xs)+n, len(r_w_s), 4, h))
 
     ct_g = np.zeros((len(xs)+n+1, len(r_w_s), h))
-    st_g = np.zeros((len(xs)+n+1, len(r_w_s)+1, 2*h))
+    st_g = np.zeros((len(xs)+n+1, len(r_w_s)+1, 2, h))
 
     it_s = np.zeros((len(xs)+n, len(r_w_s), h))
     ft_s = np.zeros((len(xs)+n, len(r_w_s), h))
@@ -243,8 +243,8 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
         w_i = 0
 
         for w, actf, actf_g in r_w_s:
-            stack = np.hstack((ht[w_i+1], ht[w_i]))
-            zt = w.dot(stack).reshape(4,-1) + b_s[w_i]
+            stack = np.vstack((ht[w_i+1], ht[w_i]))
+            zt = np.sum(w * stack, 1) + b_s[w_i]
             i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
             ct[w_i] = ct[w_i] * f + i * g
@@ -288,8 +288,8 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
         w_i = 0
 
         for w, actf, actf_g in r_w_s:
-            stack = np.hstack((ht[w_i+1], ht[w_i]))
-            zt = w.dot(stack).reshape(4,-1) + b_s[w_i]
+            stack = np.vstack((ht[w_i+1], ht[w_i]))
+            zt = np.sum(w * stack, 1) + b_s[w_i]
             i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
             ct[w_i] = ct[w_i] * f + i * g
@@ -326,10 +326,10 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
             al_g = w.T.dot(grad.T)
             w_i -= 1
 
-        st_g[cu_ind][w_i+1] = np.hstack((np.zeros(h), al_g))
+        st_g[cu_ind][w_i+1] = np.vstack((np.zeros(h), al_g))
 
         for w, actf, actf_g in reversed(r_w_s):
-            h_g = st_g[cu_ind+1][w_i][:h] + st_g[cu_ind][w_i+1][h:]
+            h_g = st_g[cu_ind+1][w_i][0] + st_g[cu_ind][w_i+1][1]
             c_g = ct_g[cu_ind+1][w_i] + h_g * ot_s[cu_ind][w_i] * actf_g[-1](ct_s[cu_ind][w_i])
 
             i_g = c_g * gt_s[cu_ind][w_i]
@@ -344,11 +344,11 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
                 g_g * actf[3](zt_s[cu_ind][w_i][3])
             ))
 
-            r_w_s_g[w_i] += z_g.reshape(-1,1).dot(np.hstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i]))[np.newaxis,:])
+            r_w_s_g[w_i] += z_g.reshape(4, 1, h) * np.vstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i])).reshape(1, 2, h)
             b_s_g[w_i] += np.sum(z_g, 1)[:,np.newaxis]
 
             ct_g[cu_ind][w_i] = c_g * ft_s[cu_ind][w_i]
-            st_g[cu_ind][w_i] = w.T.dot(z_g.reshape(-1,1)).flatten()
+            st_g[cu_ind][w_i] = np.sum(w * z_g.reshape(4, 1, h), 0)
 
             w_i -= 1
 
@@ -358,7 +358,7 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
         w_i = len(r_w_s)-1
 
         for w, actf, actf_g in reversed(r_w_s):
-            h_g = st_g[cu_ind+1][w_i][:h] + st_g[cu_ind][w_i+1][h:]
+            h_g = st_g[cu_ind+1][w_i][0] + st_g[cu_ind][w_i+1][1]
             c_g = ct_g[cu_ind+1][w_i] + h_g * ot_s[cu_ind][w_i] * actf_g[-1](ct_s[cu_ind][w_i])
 
             i_g = c_g * gt_s[cu_ind][w_i]
@@ -373,11 +373,11 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
                 g_g * actf[3](zt_s[cu_ind][w_i][3])
             ))
 
-            r_w_s_g[w_i] += z_g.reshape(-1,1).dot(np.hstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i]))[np.newaxis,:])
+            r_w_s_g[w_i] += z_g.reshape(4, 1, h) * np.vstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i])).reshape(1, 2, h)
             b_s_g[w_i] += np.sum(z_g, 1)[:,np.newaxis]
 
             ct_g[cu_ind][w_i] = c_g * ft_s[cu_ind][w_i]
-            st_g[cu_ind][w_i] = w.T.dot(z_g.reshape(-1,1)).flatten()
+            st_g[cu_ind][w_i] = np.sum(w * z_g.reshape(4, 1, h), 0)
 
             w_i -= 1
 
@@ -387,7 +387,8 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
 
     for j in range(len(r_w_s_g)):
         r_w_s_g[j] /= (n+len(xs))
-        r_w_s_g[j] += (lamb/n) * r_w_s[j][0]
+        # r_w_s_g[j] /= n
+        r_w_s_g[j] += (lamb/(n+len(xs))) * r_w_s[j][0]
 
     for j in range(len(fc_w_s_g)):
         fc_w_s_g[j] /= n
@@ -395,6 +396,7 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
 
     for j in range(len(b_s_g[:len(r_w_s_g)])):
         b_s_g[j] /= (n+len(xs))
+        # b_s_g[j] /= n
     for j in range(len(b_s_g[len(r_w_s_g):])):
         b_s_g[j] /= n
 
@@ -459,20 +461,19 @@ def main():
     # return
 
     # dst, dct = read_dataset()
-    dst = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    dst = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
     dct = {
         0: 'h',
         1: 'e',
-        2: 'l',
-        3: 'o'
+        2: 'r'
     }
 
     # -- SETUP MODEL ------------------------------------------------- #
 
     h = len(dct)
 
-    w1 = np.ones((4 * h, 2 * h))
-    w2 = np.ones((4 * h, 2 * h))
+    w1 = np.ones((4, 2, h))
+    w2 = np.ones((4, 2, h))
 
     w3 = np.ones((h, h))
 
@@ -511,22 +512,28 @@ def main():
     lamb = 0
     alpha = 10
     iters = 512
-    batch_size = 5
+    batch_size = 3
     decay = 0.9
-    dec_threshold = 1e-5
+    dec_threshold = 1e-16
     beta = 0.9
 
     n_r_w_s, n_fc_w_s, n_b_s, past_Js = sgd(dst, r_w_s, fc_w_s, b_s, 
         lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
+    # n_r_w_s, n_fc_w_s, n_b_s = r_w_s, fc_w_s, b_s
+
     # -- EVALUATE MODEL ---------------------------------------------- #
 
     xs = translate_to_dict_vector('h', dct)
-    n = 4
+    n = 2
 
     pred = predict(xs, n_r_w_s, n_fc_w_s, n_b_s, n)
     print(pred)
     print(translate_from_dict_vector(pred, dct))
+
+    xs = translate_to_dict_vector('he', dct)
+    ys = np.array([1])
+    r_w_s_g, fc_w_s_g, b_s_g = compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb)
 
     # -- VISUALIZATION ----------------------------------------------- #
 
