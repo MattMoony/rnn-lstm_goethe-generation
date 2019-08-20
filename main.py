@@ -12,7 +12,7 @@ def build_dataset(folder_name: str = '.\\goethe') -> (list, dict):
     dst_raw = []
     dct = {}
 
-    for i, c in enumerate(ascii_lowercase + ascii_lowercase.upper() + ''.join([str(n) for n in range(10)])):
+    for j, c in enumerate(ascii_lowercase + ascii_lowercase.upper() + ''.join([str(n) for n in range(10)])):
         dct[j] = c
 
     for root, dirs, files in os.walk(folder_name):
@@ -29,18 +29,22 @@ def build_dataset(folder_name: str = '.\\goethe') -> (list, dict):
 
                 dst_raw.append(cont)
 
-    dst = []
+    dst = np.array([])
     for ex in dst_raw:
         ex_arr = np.zeros((len(ex), len(dct)))
         for j, c in enumerate(ex):
             for k, v in dct.items():
                 if v == c:
                     ex_arr[j, k] = 1
-        dst.append(ex_arr)
+        
+        try:
+            np.append(dst, ex_arr, axis=1)
+        except ValueError:
+            dst = ex_arr
 
     return dst, dct
 
-def save_dataset(dst: list, dst_fname: str = 'data.pkl') -> None:
+def save_dataset(dst: np.ndarray, dst_fname: str = 'data.pkl') -> None:
     with open(dst_fname, 'wb') as f:
         pickle.dump(dst, f)
 
@@ -136,7 +140,11 @@ def init_weights(*args):
         n_avg = (np.prod(w.shape[1:]) + w.shape[0]) / 2
         w *= np.random.rand(*w.shape) * (1 / n_avg)
 
-def predict(xs, r_w_s, fc_w_s, b_s, n):
+def init_lstm_weights(*args):
+    for w in args:
+        w *= np.random.rand(*w.shape) * (1 / w.shape[-1])
+
+def generate(xs, r_w_s, fc_w_s, b_s, n):
     h = xs[0].shape[0]
 
     ct = np.zeros((len(r_w_s), h))
@@ -192,9 +200,49 @@ def predict(xs, r_w_s, fc_w_s, b_s, n):
 
     return ys
 
+def predict(xs, r_w_s, fc_w_s, b_s):
+    h = xs[0].shape[0]
+
+    ct = np.zeros((len(r_w_s), h))
+    ht = np.zeros((len(r_w_s)+1, h))
+
+    zl = None
+    al = None
+
+    ys = None
+
+    for x in xs:
+        ht = np.vstack((x, ht[1:]))
+        w_i = 0
+
+        for w, actf, actf_g in r_w_s:
+            stack = np.vstack((ht[w_i+1], ht[w_i]))
+            zt = np.sum(w * stack, 1) + b_s[w_i]
+            i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
+
+            ct[w_i] = ct[w_i] * f + i * g
+            ht[w_i+1] = o * actf[-1](ct[w_i])
+
+            w_i += 1
+
+        al = ht[-1]
+
+        for w, actf, actf_g in fc_w_s:
+            zl = w.dot(al) + b_s[w_i]
+            al = actf(zl)
+
+            w_i += 1
+
+        try:
+            ys = np.append(ys, al[np.newaxis,:], axis=0)
+        except ValueError:
+            ys = al[np.newaxis,:]
+
+    return ys
+
 def loss(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
     n = len(ys)
-    preds = predict(xs, r_w_s, fc_w_s, b_s, n)
+    preds = predict(xs, r_w_s, fc_w_s, b_s)
     
     l = np.sum(-np.log(preds[np.arange(n), ys]))
     l /= n
@@ -207,19 +255,19 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
     n = len(ys)
 
     ct = np.zeros((len(r_w_s), h))
-    ht = np.zeros((len(r_w_s)+1, h))
+    ht = np.zeros((len(r_w_s) + 1, h))
 
-    ct_s = np.zeros((len(xs)+n, len(r_w_s), h))
-    ht_s = np.zeros((len(xs)+n, len(r_w_s)+1, h))
-    zt_s = np.zeros((len(xs)+n, len(r_w_s), 4, h))
+    ct_s = np.zeros((n, len(r_w_s), h))
+    zt_s = np.zeros((n, len(r_w_s), 4, h))
+    ht_s = np.zeros((n, len(r_w_s) + 1, h))
 
-    ct_g = np.zeros((len(xs)+n+1, len(r_w_s), h))
-    st_g = np.zeros((len(xs)+n+1, len(r_w_s)+1, 2, h))
+    ct_g = np.zeros((n + 1, len(r_w_s), h))
+    st_g = np.zeros((n + 1, len(r_w_s) + 1, 2, h))
 
-    it_s = np.zeros((len(xs)+n, len(r_w_s), h))
-    ft_s = np.zeros((len(xs)+n, len(r_w_s), h))
-    ot_s = np.zeros((len(xs)+n, len(r_w_s), h))
-    gt_s = np.zeros((len(xs)+n, len(r_w_s), h))
+    it_s = np.zeros((n, len(r_w_s), h))
+    ft_s = np.zeros((n, len(r_w_s), h))
+    ot_s = np.zeros((n, len(r_w_s), h))
+    gt_s = np.zeros((n, len(r_w_s), h))
 
     zl = None
     al = None
@@ -247,9 +295,6 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
             zt = np.sum(w * stack, 1) + b_s[w_i]
             i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
 
-            ct[w_i] = ct[w_i] * f + i * g
-            ht[w_i+1] = o * actf[-1](ct[w_i])
-
             zt_s[cu_ind][w_i] = zt
 
             it_s[cu_ind][w_i] = i
@@ -257,73 +302,44 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
             ot_s[cu_ind][w_i] = o
             gt_s[cu_ind][w_i] = g
 
+            ct[w_i] = ct[w_i] * f + i * g
+            ht[w_i+1] = o * actf[-1](ct[w_i])
+
             w_i += 1
 
-        ht_s[cu_ind] = ht
-        ct_s[cu_ind] = ct
+        ct_s[cu_ind]    = ct.copy()
+        ht_s[cu_ind]    = ht.copy()
 
-        cu_ind += 1
-
-    for j in range(n):
-        al_s.append([])
         zl_s.append([])
+        al_s.append([])
 
         al = ht[-1]
-        w_i = len(r_w_s)
-
-        al_s[j].append(al)
+        al_s[cu_ind].append(al)
 
         for w, actf, actf_g in fc_w_s:
             zl = w.dot(al) + b_s[w_i]
             al = actf(zl)
 
-            al_s[j].append(al)
-            zl_s[j].append(zl)
+            zl_s[cu_ind].append(zl)
+            al_s[cu_ind].append(al)
 
             w_i += 1
-
-        x = np.where(np.arange(al.shape[0]) == np.argmax(al), 1, 0)
-
-        ht = np.vstack((x, ht[1:]))
-        w_i = 0
-
-        for w, actf, actf_g in r_w_s:
-            stack = np.vstack((ht[w_i+1], ht[w_i]))
-            zt = np.sum(w * stack, 1) + b_s[w_i]
-            i, f, o, g = [actf[u](v) for u, v in enumerate(zt)]
-
-            ct[w_i] = ct[w_i] * f + i * g
-            ht[w_i+1] = o * actf[-1](ct[w_i])
-
-            zt_s[cu_ind][w_i] = zt
-
-            it_s[cu_ind][w_i] = i
-            ft_s[cu_ind][w_i] = f
-            ot_s[cu_ind][w_i] = o
-            gt_s[cu_ind][w_i] = g
-
-            w_i += 1
-
-        ht_s[cu_ind] = ht
-        ct_s[cu_ind] = ct
 
         cu_ind += 1
 
     # -- BACKWARD PASS ----------------------------------------------- #    
 
-    cu_ind = len(xs) + n - 1
-
-    for j in reversed(range(n)):
-        al_g = np.ones(ys[j].shape)
+    for cu_ind in reversed(range(n)):
         w_i = len(b_s) - 1
+        al_g = np.ones(al.shape)
 
         for w, actf, actf_g in reversed(fc_w_s):
-            grad = al_g * actf_g(zl_s[j][w_i-len(b_s)+1], ys[j])
+            zl_g = al_g * actf_g(zl_s[cu_ind][len(b_s) - w_i - 1], ys[cu_ind])
 
-            fc_w_s_g[w_i-len(r_w_s)] += grad.dot(al_s[j][w_i-len(b_s)].T)
-            b_s_g[w_i] += np.sum(grad)
+            b_s_g[w_i] += np.sum(zl_g)
+            fc_w_s_g[w_i - len(r_w_s)] += zl_g.dot(al_s[cu_ind][len(b_s) - w_i - 1].T)
 
-            al_g = w.T.dot(grad.T)
+            al_g = w.T.dot(zl_g)
             w_i -= 1
 
         st_g[cu_ind][w_i+1] = np.vstack((np.zeros(h), al_g))
@@ -338,100 +354,73 @@ def compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb=1e-6):
             g_g = c_g * it_s[cu_ind][w_i]
 
             z_g = np.vstack((
-                i_g * actf[0](zt_s[cu_ind][w_i][0]),
-                f_g * actf[1](zt_s[cu_ind][w_i][1]),
-                o_g * actf[2](zt_s[cu_ind][w_i][2]),
-                g_g * actf[3](zt_s[cu_ind][w_i][3])
+                i_g * actf_g[0](zt_s[cu_ind][w_i][0]),
+                f_g * actf_g[1](zt_s[cu_ind][w_i][1]),
+                o_g * actf_g[2](zt_s[cu_ind][w_i][2]),
+                g_g * actf_g[3](zt_s[cu_ind][w_i][3])
             ))
 
-            r_w_s_g[w_i] += z_g.reshape(4, 1, h) * np.vstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i])).reshape(1, 2, h)
             b_s_g[w_i] += np.sum(z_g, 1)[:,np.newaxis]
+            r_w_s_g[w_i] += z_g.reshape(4, 1, h) * np.vstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i])).reshape(1, 2, h)
 
             ct_g[cu_ind][w_i] = c_g * ft_s[cu_ind][w_i]
             st_g[cu_ind][w_i] = np.sum(w * z_g.reshape(4, 1, h), 0)
 
             w_i -= 1
 
-        cu_ind -= 1
 
-    for x in reversed(xs):
-        w_i = len(r_w_s)-1
-
-        for w, actf, actf_g in reversed(r_w_s):
-            h_g = st_g[cu_ind+1][w_i][0] + st_g[cu_ind][w_i+1][1]
-            c_g = ct_g[cu_ind+1][w_i] + h_g * ot_s[cu_ind][w_i] * actf_g[-1](ct_s[cu_ind][w_i])
-
-            i_g = c_g * gt_s[cu_ind][w_i]
-            f_g = c_g * ct_s[cu_ind-1][w_i]
-            o_g = h_g * actf[-1](ct_s[cu_ind][w_i])
-            g_g = c_g * it_s[cu_ind][w_i]
-
-            z_g = np.vstack((
-                i_g * actf[0](zt_s[cu_ind][w_i][0]),
-                f_g * actf[1](zt_s[cu_ind][w_i][1]),
-                o_g * actf[2](zt_s[cu_ind][w_i][2]),
-                g_g * actf[3](zt_s[cu_ind][w_i][3])
-            ))
-
-            r_w_s_g[w_i] += z_g.reshape(4, 1, h) * np.vstack((ht_s[cu_ind-1][w_i+1], ht_s[cu_ind][w_i])).reshape(1, 2, h)
-            b_s_g[w_i] += np.sum(z_g, 1)[:,np.newaxis]
-
-            ct_g[cu_ind][w_i] = c_g * ft_s[cu_ind][w_i]
-            st_g[cu_ind][w_i] = np.sum(w * z_g.reshape(4, 1, h), 0)
-
-            w_i -= 1
-
-        cu_ind -= 1
-
-    # ---------------------------------------------------------------- #    
+    # -- AVERAGING + REGULARIZATION ---------------------------------- #    
 
     for j in range(len(r_w_s_g)):
-        r_w_s_g[j] /= (n+len(xs))
-        # r_w_s_g[j] /= n
-        r_w_s_g[j] += (lamb/(n+len(xs))) * r_w_s[j][0]
+        r_w_s_g[j] /= n
+        r_w_s_g[j] += (lamb/n) * r_w_s[j][0]
 
     for j in range(len(fc_w_s_g)):
         fc_w_s_g[j] /= n
         fc_w_s_g[j] += (lamb/n) * fc_w_s[j][0]
 
-    for j in range(len(b_s_g[:len(r_w_s_g)])):
-        b_s_g[j] /= (n+len(xs))
-        # b_s_g[j] /= n
-    for j in range(len(b_s_g[len(r_w_s_g):])):
+    for j in range(len(b_s_g)):
         b_s_g[j] /= n
+
+    # ---------------------------------------------------------------- #    
 
     return r_w_s_g, fc_w_s_g, b_s_g
 
 # -------------------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
-def sgd(dst, r_w_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=2, decay=0.9, dec_threshold=1e-2, beta=0.9):
-    # dst = 'data-set'
+def sgd(dst, r_w_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=32, decay=0.9, dec_threshold=1e-32, beta=0.9):
+    # -- INITIALIZATION ---------------------------------------------- #    
+
     past_Js = []
 
-    r_w_s = [w.copy() for w in r_w_s]
-    fc_w_s = [w.copy() for w in fc_w_s]
+    r_w_s = [[w[0].copy(), w[1], w[2]] for w in r_w_s]
+    fc_w_s = [[w[0].copy(), w[1], w[2]] for w in fc_w_s]
     b_s = [b.copy() for b in b_s]
 
-    v_r_w_s = [w[0].copy() for w in r_w_s]
-    v_fc_w_s = [w[0].copy() for w in fc_w_s]
-    v_b_s = [b.copy() for b in b_s]
+    v_r_w_s = [np.zeros(w[0].shape) for w in r_w_s]
+    v_fc_w_s = [np.zeros(w[0].shape) for w in fc_w_s]
+    v_b_s = [np.zeros(b.shape) for b in b_s]
+
+    # -- STOCHASTIC GRADIENT DESCENT --------------------------------- #    
 
     for i in range(iters):
         starti = np.random.randint(0,len(dst)-batch_size+1)
         batch = dst[starti:starti+batch_size]
 
         xs = batch[:-1]
-        ys = batch[-1:]
+        ys = np.argmax(batch[1:], 1)
 
         r_w_s_g, fc_w_s_g, b_s_g = compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb)
 
         for j, w_g in enumerate(r_w_s_g):
             v_r_w_s[j] = beta * v_r_w_s[j] + (1 - beta) * w_g
             r_w_s[j][0] -= alpha * v_r_w_s[j]
+
         for j, w_g in enumerate(fc_w_s_g):
             v_fc_w_s[j] = beta * v_fc_w_s[j] + (1 - beta) * w_g
             fc_w_s[j][0] -= alpha * v_fc_w_s[j]
+
         for j, b_g in enumerate(b_s_g):
             v_b_s[j] = beta * v_b_s[j] + (1 - beta) * b_g
             b_s[j] -= alpha * v_b_s[j]
@@ -443,118 +432,172 @@ def sgd(dst, r_w_s, fc_w_s, b_s, lamb=1e-6, alpha=1, iters=32, batch_size=2, dec
         try:
             if past_Js[-2] - past_Js[-1] <= dec_threshold:
                 alpha *= decay
+                dec_threshold *= decay
         except IndexError:
             pass
 
-        print('[  - | -  ]: alpha -> {:} ... '.format(alpha))
+        print('\t...: alpha -> {:} ... '.format(alpha))
+
+    # ---------------------------------------------------------------- #    
 
     return r_w_s, fc_w_s, b_s, past_Js
+
+def find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range, lamb_range, n, iters=16, batch_size=32, decay=0.9, dec_threshold=1e-32, beta=0.9):
+    alphas  = np.random.rand(n) * (alpha_range[1] - alpha_range[0]) + alpha_range[0]
+    lambs   = np.random.rand(n) * (lamb_range[1] - lamb_range[0]) + lamb_range[0]
+
+    l_lss = np.inf
+    
+    b_alpha = 0
+    b_lamb  = 0
+
+    for alpha in alphas:
+        for lamb in lambs:
+            n_r_w_s, n_fc_w_s, n_b_s, past_Js = sgd(dst, r_w_s, fc_w_s, b_s, 
+                lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+
+            starti = np.random.randint(0,len(dst)-batch_size+1)
+            batch = dst[starti:starti+batch_size]
+
+            xs = batch[:-1]
+            ys = np.argmax(batch[1:], 1)
+
+            c_lss = loss(xs, ys, n_r_w_s, n_fc_w_s, n_b_s) 
+            print('[a={:.3f};l={:.3f}] ... loss -> {:} ... '.format(alpha, lamb, c_lss))
+            
+            if c_lss < l_lss:
+                l_lss = c_lss
+                
+                b_alpha = alpha
+                b_lamb = lamb
+
+    return b_alpha, b_lamb
 
 # -------------------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
 def main():
-    # -- LOAD DATASET ------------------------------------------------ #
+    print('# -- LOAD DATASET ------------------------------------------------ #')
 
     # dst, dct = build_dataset()
     # save_dataset(dst)
     # return
 
-    # dst, dct = read_dataset()
-    dst = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-    dct = {
-        0: 'h',
-        1: 'e',
-        2: 'r'
-    }
+    dst, dct = read_dataset()
+    # dst = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    # dct = {
+    #     0: 'h',
+    #     1: 'e',
+    #     2: 'l',
+    #     3: 'o'
+    # }
 
-    # -- SETUP MODEL ------------------------------------------------- #
+    print('# -- SETUP MODEL ------------------------------------------------- #')
 
     h = len(dct)
 
     w1 = np.ones((4, 2, h))
     w2 = np.ones((4, 2, h))
+    w3 = np.ones((4, 2, h))
 
-    w3 = np.ones((h, h))
+    w4 = np.ones((h, h))
 
-    init_weights(w1, w2, w3)
+    # init_weights(w1, w2, w3, w4)
+
+    init_lstm_weights(w1, w2, w3)
+    init_weights(w4)
 
     b1 = np.zeros((4, 1)) + 1e-8
     b2 = np.zeros((4, 1)) + 1e-8
+    b3 = np.zeros((4, 1)) + 1e-8
 
-    b3 = np.zeros(1) + 1e-8
+    b4 = np.zeros(1) + 1e-8
 
     r_w_s = [
         [
             w1, 
-            (sigmoid, sigmoid, sigmoid, tanh, tanh_grad), 
+            (sigmoid, sigmoid, sigmoid, tanh, tanh), 
             (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad)
         ],
         [
             w2,
-            (sigmoid, sigmoid, sigmoid, tanh, ReLU), 
+            (sigmoid, sigmoid, sigmoid, tanh, tanh), 
             (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad)
         ],
+        [
+            w3,
+            (sigmoid, sigmoid, sigmoid, tanh, tanh), 
+            (sigmoid_grad, sigmoid_grad, sigmoid_grad, tanh_grad, tanh_grad)
+        ]
     ]
 
     fc_w_s = [
         [
-            w3,
+            w4,
             softmax,
             softmax_grad
         ]
     ]
 
-    b_s = [b1, b2, b3]
+    b_s = [b1, b2, b3, b4]
 
-    # -- TRAIN MODEL ------------------------------------------------- #
+    print('# -- TRAIN MODEL ------------------------------------------------- #')
 
-    lamb = 0
+    lamb = 1e-4
     alpha = 10
-    iters = 512
-    batch_size = 3
-    decay = 0.9
-    dec_threshold = 1e-16
+    iters = 1024
+    batch_size = 256
+    decay = 0.99
+    dec_threshold = 1e-64
     beta = 0.9
+
+    # alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[1e-2, 100], lamb_range=[0,1], n=16,
+    #     iters=16, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     n_r_w_s, n_fc_w_s, n_b_s, past_Js = sgd(dst, r_w_s, fc_w_s, b_s, 
         lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     # n_r_w_s, n_fc_w_s, n_b_s = r_w_s, fc_w_s, b_s
 
-    # -- EVALUATE MODEL ---------------------------------------------- #
+    print('# -- EVALUATE MODEL ---------------------------------------------- #')
 
-    xs = translate_to_dict_vector('h', dct)
-    n = 2
+    # xs = translate_to_dict_vector('hell', dct)
 
-    pred = predict(xs, n_r_w_s, n_fc_w_s, n_b_s, n)
-    print(pred)
-    print(translate_from_dict_vector(pred, dct))
+    # pred = predict(xs, n_r_w_s, n_fc_w_s, n_b_s)
+    # print(pred)
+    # print(translate_from_dict_vector(pred, dct))
 
-    xs = translate_to_dict_vector('he', dct)
-    ys = np.array([1])
-    r_w_s_g, fc_w_s_g, b_s_g = compute_gradient(xs, ys, r_w_s, fc_w_s, b_s, lamb)
+    # ys = np.array([1, 2, 2, 3])
+    # lss = loss(xs, ys, r_w_s, fc_w_s, b_s, lamb)
 
-    # -- VISUALIZATION ----------------------------------------------- #
+    # print('Loss: {:} ... '.format(lss))
+
+    print('# -- VISUALIZATION ----------------------------------------------- #')
 
     plot_j_epoch(past_Js)
     plt.show()
 
-    # -- GENERATION -------------------------------------------------- #
+    print('# -- GENERATION -------------------------------------------------- #')
 
-    # n_gen_chars = 1024
+    # n = 4
+    # xs = translate_to_dict_vector('h', dct)
+    # gen = generate(xs, r_w_s, fc_w_s, b_s, n)
 
-    # try:
-    #     beg_ch = input('Enter beginning character: ')
-    #     text = translate_from_dict_vector(predict(translate_to_dict_vector(beg_ch, dct), 
-    #           n_rw_s, n_fc_w_s, n_b_s, n_gen_chars), dct)
+    # print('Generated text: "{:}" ... '.format(translate_from_dict_vector(gen, dct)))
 
-    #     with open('out.txt', 'w') as f:
-    #         f.write(text)
-    # except KeyboardInterrupt:
-    #     pass
+    n_gen_chars = 1024
+
+    try:
+        beg_ch = input('Enter beginning character: ')
+        text = translate_from_dict_vector(generate(translate_to_dict_vector(beg_ch, dct), 
+              n_r_w_s, n_fc_w_s, n_b_s, n_gen_chars), dct)
+
+        with open('out.txt', 'w') as f:
+            f.write(text)
+    except KeyboardInterrupt:
+        pass
     
-    # ---------------------------------------------------------------- #
+    print('# ---------------------------------------------------------------- #')
 
 if __name__ == '__main__':
     main()
