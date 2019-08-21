@@ -545,9 +545,9 @@ def main():
 
     lamb = 1e-4
     alpha = 10
-    iters = 1024
-    batch_size = 256
-    decay = 0.99
+    iters = 512
+    batch_size = 64
+    decay = 0.9
     dec_threshold = 1e-64
     beta = 0.9
 
