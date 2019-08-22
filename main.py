@@ -543,7 +543,7 @@ def main():
 
     print('# -- TRAIN MODEL ------------------------------------------------- #')
 
-    lamb = 1e-4
+    lamb = 3e-4
     alpha = 10
     iters = 512
     batch_size = 64
