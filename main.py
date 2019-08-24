@@ -473,6 +473,31 @@ def find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range, lamb_range, n, iters=16, bat
 
     return b_alpha, b_lamb
 
+def find_lamb(dst, r_w_s, fc_w_s, b_s, alpha, lamb_range, n, iters=16, batch_size=32, decay=0.9, dec_threshold=1e-32, beta=0.9):
+    lambs   = np.random.rand(n) * (lamb_range[1] - lamb_range[0]) + lamb_range[0]
+
+    l_lss = np.inf
+    b_lamb  = 0
+
+    for lamb in lambs:
+        n_r_w_s, n_fc_w_s, n_b_s, past_Js = sgd(dst, r_w_s, fc_w_s, b_s, 
+            lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+
+        starti = np.random.randint(0,len(dst)-batch_size+1)
+        batch = dst[starti:starti+batch_size]
+
+        xs = batch[:-1]
+        ys = np.argmax(batch[1:], 1)
+
+        c_lss = loss(xs, ys, n_r_w_s, n_fc_w_s, n_b_s) 
+        print('[l={:.3f}] ... loss -> {:} ... '.format(lamb, c_lss))
+        
+        if c_lss < l_lss:
+            l_lss = c_lss
+            b_lamb = lamb
+
+    return b_lamb
+
 # -------------------------------------------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------------- #
 
@@ -546,13 +571,21 @@ def main():
     lamb = 3e-5
     alpha = 10
     iters = 512
-    batch_size = 64
+    batch_size = 128
     decay = 0.9
     dec_threshold = 1e-64
     beta = 0.9
 
     # alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[1e-2, 100], lamb_range=[0,1], n=16,
     #     iters=16, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+
+    lamb = find_lamb(dst, r_w_s, fc_w_s, b_s, alpha, 
+        lamb_range=[0,1], n=32, iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+
+    print('='*32)
+    print('Best Lambda: {:} ... '.format(lamb))
+    print('Press <ENTER> to continue ... ')
+    input('='*32)
 
     n_r_w_s, n_fc_w_s, n_b_s, past_Js = sgd(dst, r_w_s, fc_w_s, b_s, 
         lamb=lamb, alpha=alpha, iters=iters, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)

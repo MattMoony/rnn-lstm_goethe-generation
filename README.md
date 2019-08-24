@@ -36,7 +36,7 @@ Now, all that's left is to find the right hyper-parameters, as it still doesn't 
 
 _P.S.:_ The code has worked on a much easier dataset with little to no problems before, which allows me to conclude that all of the troubles with convergence are now a pure hyper-parameters issue. (Or there's too little data ... )
 
-![J/Epoch-Graph(still bad convergence)](media/JEpoch_Figure2.png)
+![J/Epoch-Graph(still bad convergence)](media/JEpoch_Figure3.png)
 
 ---
 
