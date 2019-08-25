@@ -576,11 +576,11 @@ def main():
     dec_threshold = 1e-64
     beta = 0.9
 
-    # alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[1e-2, 100], lamb_range=[0,1], n=16,
-    #     iters=16, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+    alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[1e-2, 100], lamb_range=[0,0.05], n=64,
+        iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
-    lamb = find_lamb(dst, r_w_s, fc_w_s, b_s, alpha, 
-        lamb_range=[0,1], n=32, iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+    # lamb = find_lamb(dst, r_w_s, fc_w_s, b_s, alpha, 
+    #     lamb_range=[0,0.05], n=64, iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     print('='*32)
     print('Best Lambda: {:} ... '.format(lamb))
