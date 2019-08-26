@@ -568,21 +568,24 @@ def main():
 
     print('# -- TRAIN MODEL ------------------------------------------------- #')
 
-    lamb = 3e-5
-    alpha = 10
+    # lamb = 0.001392242332007387
+    # alpha = 95.17816859593835
+    lamb = 0.046662315944121624
+    alpha = 11.750182287676584
     iters = 512
     batch_size = 128
-    decay = 0.9
+    decay = 1
     dec_threshold = 1e-64
     beta = 0.9
 
-    alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[1e-2, 100], lamb_range=[0,0.05], n=64,
-        iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+    alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[3, 30], lamb_range=[0,0.06], n=48,
+        iters=128, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     # lamb = find_lamb(dst, r_w_s, fc_w_s, b_s, alpha, 
-    #     lamb_range=[0,0.05], n=64, iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+    #     lamb_range=[0,0.005], n=64, iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     print('='*32)
+    print('Best L-Rate: {:} ... '.format(alpha))
     print('Best Lambda: {:} ... '.format(lamb))
     print('Press <ENTER> to continue ... ')
     input('='*32)
