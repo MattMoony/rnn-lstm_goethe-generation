@@ -579,7 +579,7 @@ def main():
     beta = 0.9
 
     alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[3, 30], lamb_range=[0,0.06], n=48,
-        iters=128, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
+        iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     # lamb = find_lamb(dst, r_w_s, fc_w_s, b_s, alpha, 
     #     lamb_range=[0,0.005], n=64, iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
