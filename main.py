@@ -578,7 +578,7 @@ def main():
     dec_threshold = 1e-64
     beta = 0.9
 
-    alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[3, 30], lamb_range=[0,0.06], n=48,
+    alpha, lamb = find_hyps(dst, r_w_s, fc_w_s, b_s, alpha_range=[3, 30], lamb_range=[0,0.06], n=32,
         iters=64, batch_size=batch_size, decay=decay, dec_threshold=dec_threshold, beta=beta)
 
     # lamb = find_lamb(dst, r_w_s, fc_w_s, b_s, alpha, 
