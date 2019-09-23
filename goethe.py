@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from torch import nn, optim
 import torch.nn.functional as F
+from argparse import ArgumentParser
 
 EMBEDDING_DIM = 8
 HIDDEN_DIM = 8
@@ -55,27 +56,33 @@ def batch_train(model, batch):
     lss = F.nll_loss(pred, torch.argmax(batch[-1]).unsqueeze(dim=0))
     return lss
 
-def train(model, ds, batch_size=32, lr=1e-2, iters=64, iiters=64):
+def train(model, ds, batch_size=32, lr=1e-2, iters=64, iiters=64, rand_start=False):
     model.train()
 
     optimizer   = optim.Adam(model.parameters(), lr=lr)
-    starti      = np.random.randint(0, len(ds)-batch_size-iiters)
+    if rand_start:
+        starti  = np.random.randint(0, len(ds)-batch_size-iiters)
+    else:
+        starti  = 0
 
-    for i in range(iters):
-        avg_lss = 0.
+    try:
+        for i in range(iters):
+            avg_lss = 0.
 
-        for j in range(iiters):
-            optimizer.zero_grad()
-            batch = ds[starti+j:starti+j+batch_size+1]
+            for j in range(iiters):
+                optimizer.zero_grad()
+                batch = ds[starti+j:starti+j+batch_size+1]
 
-            lss = batch_train(model, batch)
-            lss.backward()
-            optimizer.step()
+                lss = batch_train(model, batch)
+                lss.backward()
+                optimizer.step()
 
-            avg_lss += lss.item()
+                avg_lss += lss.item()
 
-        avg_lss /= iiters
-        print('[iter#{:04d}]: Loss -> {:.3f} ... '.format(i, avg_lss))
+            avg_lss /= iiters
+            print('[iter#{:04d}]: Loss -> {:.3f} ... '.format(i, avg_lss))
+    except KeyboardInterrupt:
+        pass
 
 def batch_process(model, batch):
     pred, hn, cn = model(batch[0])
@@ -107,9 +114,34 @@ def generate(model, ds, vocab_size, nchars, batch_size=32, device='cuda'):
     return content
 
 def main():
+    parser = ArgumentParser()
+
+    parser.add_argument('-p', '--m-path', type=str, dest='mpath', 
+                        help='Specify model path ... ', default='johaNN.pt')
+
+    parser.add_argument('--iters', type=int, dest='iters', 
+                        help='Specify iteration count ... ', default=128)
+    parser.add_argument('--iiters', type=int, dest='iiters',
+                        help='Specify inner iteration count ... ', default=1024)
+                        
+    parser.add_argument('--lr', type=float, dest='lr',
+                        help='Specify learning rate (alpha) ... ', default=1e-3)
+    parser.add_argument('--batch-size', type=int, dest='batch_size', 
+                        help='Specify the batch size ... ', default=32)
+    parser.add_argument('--rand-start', action='store_true', dest='rand_start', 
+                        help='Random start index?')
+
+    args = parser.parse_args()
+
+    mpath       = args.mpath
     vocab_size  = 256
+
     JohaNN = GoetheNN(EMBEDDING_DIM, HIDDEN_DIM, vocab_size)
     JohaNN = JohaNN.cuda()
+
+    yN = input('Load model? [y/N] ')
+    if yN in ['y', 'Y']:
+        JohaNN.load_state_dict(torch.load(mpath))
 
     inp = utils.char_to_tensor('ß', device='cuda')
     cha, hn, cn = JohaNN(inp)
@@ -118,14 +150,19 @@ def main():
     ds = build_dataset('data.txt')
     print('Dataset-Size: {}'.format(ds.size()))
 
-    train(JohaNN, ds, iters=64, iiters=256, lr=1e-3, batch_size=32)
+    train(JohaNN, ds, iters=args.iters, iiters=args.iiters, lr=args.lr, 
+        batch_size=args.batch_size, rand_start=args.rand_start)
 
     print('='*64)
-    samp = generate(JohaNN, ds, vocab_size, nchars=64, batch_size=64)
+    samp = generate(JohaNN, ds, vocab_size, nchars=128, batch_size=args.batch_size)
     print('Sample: {}'.format(samp))
     with open('sample.txt', 'wb') as f:
         f.write(samp.encode('utf-8'))
     print('='*64)
+
+    yN = input('Save model? [y/N] ')
+    if yN in ['y', 'Y']:
+        torch.save(JohaNN.state_dict(), mpath)
 
 if __name__ == '__main__':
     main()
