@@ -68,6 +68,7 @@ def train(model, ds, batch_size=32, lr=1e-2, iters=64, iiters=64, rand_start=Fal
     try:
         for i in range(iters):
             avg_lss = 0.
+            print('{:04d}'.format(i), '-'*59)
 
             for j in range(iiters):
                 optimizer.zero_grad()
@@ -78,6 +79,7 @@ def train(model, ds, batch_size=32, lr=1e-2, iters=64, iiters=64, rand_start=Fal
                 optimizer.step()
 
                 avg_lss += lss.item()
+                # print('\t[{:04d}|{:04d}]: Loss -> {:.3f} ... '.format(i, j, lss.item()))
 
             avg_lss /= iiters
             print('[iter#{:04d}]: Loss -> {:.3f} ... '.format(i, avg_lss))
