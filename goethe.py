@@ -1,3 +1,4 @@
+import os
 import utils
 import torch
 import numpy as np
@@ -75,14 +76,17 @@ def train(model, ds, batch_size=32, lr=1e-2, iters=64, iiters=64, rand_start=Fal
                 batch = ds[starti+j:starti+j+batch_size+1]
 
                 lss = batch_train(model, batch)
-                lss.backward()
-                optimizer.step()
+                avg_lss += lss
+                # lss.backward()
+                # optimizer.step()
 
-                avg_lss += lss.item()
                 # print('\t[{:04d}|{:04d}]: Loss -> {:.3f} ... '.format(i, j, lss.item()))
 
             avg_lss /= iiters
-            print('[iter#{:04d}]: Loss -> {:.3f} ... '.format(i, avg_lss))
+            avg_lss.backward()
+            optimizer.step()
+
+            print('[iter#{:04d}]: Loss -> {:.3f} ... '.format(i, avg_lss.item()))
     except KeyboardInterrupt:
         pass
 
@@ -119,7 +123,14 @@ def main():
     parser = ArgumentParser()
 
     parser.add_argument('-p', '--m-path', type=str, dest='mpath', 
-                        help='Specify model path ... ', default='johaNN.pt')
+                        help='Specify model path ... ')
+
+    parser.add_argument('-g', '--generate', action='store_true', dest='gen',
+                        help='Only generate text?')
+    parser.add_argument('-n', '--n-chars', type=int, dest='nchars',
+                        help='Specify number of chars to be generated ... ', default=64)
+    parser.add_argument('--samp-path', type=str, dest='samp_path',
+                        help='Specify the sample save path ... ')
 
     parser.add_argument('--iters', type=int, dest='iters', 
                         help='Specify iteration count ... ', default=128)
@@ -141,16 +152,27 @@ def main():
     JohaNN = GoetheNN(EMBEDDING_DIM, HIDDEN_DIM, vocab_size)
     JohaNN = JohaNN.cuda()
 
-    yN = input('Load model? [y/N] ')
-    if yN in ['y', 'Y']:
-        JohaNN.load_state_dict(torch.load(mpath))
-
-    inp = utils.char_to_tensor('ß', device='cuda')
-    cha, hn, cn = JohaNN(inp)
+    if args.mpath:
+        if os.path.isfile(args.mpath):
+            print('Loading model ... ')
+            JohaNN.load_state_dict(torch.load(mpath))
+        else:
+            print('[!] Warning: Model path invalid (no such file); Proceeding without loading a model ... ')
 
     print('Building dataset ... ')
     ds = build_dataset('data.txt')
     print('Dataset-Size: {}'.format(ds.size()))
+
+    if args.gen:
+        print('='*64)
+        samp = generate(JohaNN, ds, vocab_size, nchars=args.nchars, batch_size=args.batch_size)
+        print('Sample: {}'.format(samp))
+        if args.samp_path and os.path.isdir(os.path.dirname(args.samp_path)):
+            with open(args.samp_path, 'wb') as f:
+                f.write(samp.encode('utf-8'))
+        print('='*64)
+
+        os._exit(0)
 
     train(JohaNN, ds, iters=args.iters, iiters=args.iiters, lr=args.lr, 
         batch_size=args.batch_size, rand_start=args.rand_start)
@@ -158,13 +180,18 @@ def main():
     print('='*64)
     samp = generate(JohaNN, ds, vocab_size, nchars=128, batch_size=args.batch_size)
     print('Sample: {}'.format(samp))
-    with open('sample.txt', 'wb') as f:
-        f.write(samp.encode('utf-8'))
+    if args.samp_path and os.path.isdir(os.path.dirname(args.samp_path)):
+            with open(args.samp_path, 'wb') as f:
+                f.write(samp.encode('utf-8'))
     print('='*64)
 
     yN = input('Save model? [y/N] ')
     if yN in ['y', 'Y']:
-        torch.save(JohaNN.state_dict(), mpath)
+        spath = ''
+        while not os.path.isdir(os.path.dirname(spath)):
+            spath = input('Enter destination: ')
+        
+        torch.save(JohaNN.state_dict(), spath)
 
 if __name__ == '__main__':
     main()
