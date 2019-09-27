@@ -76,17 +76,18 @@ def train(model, ds, batch_size=32, lr=1e-2, iters=64, iiters=64, rand_start=Fal
                 batch = ds[starti+j:starti+j+batch_size+1]
 
                 lss = batch_train(model, batch)
-                avg_lss += lss
-                # lss.backward()
-                # optimizer.step()
+                # avg_lss += lss
+                lss.backward()
+                optimizer.step()
 
+                avg_lss += lss.item()
                 # print('\t[{:04d}|{:04d}]: Loss -> {:.3f} ... '.format(i, j, lss.item()))
 
             avg_lss /= iiters
-            avg_lss.backward()
-            optimizer.step()
+            # avg_lss.backward()
+            # optimizer.step()
 
-            print('[iter#{:04d}]: Loss -> {:.3f} ... '.format(i, avg_lss.item()))
+            print('[iter#{:04d}]: Loss -> {:.3f} ... '.format(i, avg_lss))
     except KeyboardInterrupt:
         pass
 
